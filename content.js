@@ -41,7 +41,7 @@ function injectNotePanel() {
   `;
 
   panel.innerHTML = `
-    <h3 style="margin: 0 0 8px 0; font-size: 15px; color: #fff;">Video Notes</h3>
+    <h3 style="margin: 0 0 8px 0; font-size: 15px; color: #fff;">Youtube Notes for Merve</h3>
     <textarea id="yt-note-input" placeholder="Write a note... (Ctrl+Enter to save)" style="width: 100%; height: 60px; box-sizing: border-box; background: #181818; color: white; border: 1px solid #383838; border-radius: 4px; padding: 6px; resize: vertical; font-family: inherit; font-size: 13px;"></textarea>
     <button id="yt-note-save-btn" style="width: 100%; padding: 6px; margin-top: 6px; background: #3ea6ff; color: #0f0f0f; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 13px;">Save Note (Ctrl+Enter)</button>
     <div id="yt-notes-list" style="margin-top: 10px; max-height: 180px; overflow-y: auto;"></div>
