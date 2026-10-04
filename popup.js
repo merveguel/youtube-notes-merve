@@ -1,94 +1,88 @@
-let currentTimestamp = 0;
+document.addEventListener("DOMContentLoaded", () => {
+  const noteInput = document.getElementById("yt-note-input");
+  const saveBtn = document.getElementById("save-note-btn");
+  const exportBtn = document.getElementById("export-btn");
+  const dashboardBtn = document.getElementById("open-dashboard-btn");
 
-// Grab timestamp from video via content script
-document.getElementById("get-time-btn").addEventListener("click", async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab || !tab.id) return;
-  
-  chrome.tabs.sendMessage(tab.id, { action: "getCurrentTime" }, (response) => {
-    if (chrome.runtime.lastError || !response || response.time === undefined) {
-      alert("Make sure you are on an active YouTube video page.");
+  // Helper to extract YouTube Video ID
+  function getYouTubeVideoId(url) {
+    if (!url) return null;
+    const match = url.match(/[?&]v=([^&]+)/);
+    return match && match[1] ? match[1] : null;
+  }
+
+  // Helper to get Thumbnail URL
+  function getYouTubeThumbnail(videoId) {
+    return videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : "";
+  }
+
+  // 1. Save Note Handler (Automatically grabs timestamp)
+  saveBtn?.addEventListener("click", async () => {
+    const text = noteInput?.value.trim();
+    if (!text) return;
+
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.url || !tab.url.includes("youtube.com/watch")) {
+      alert("Please open a YouTube video first!");
       return;
     }
-    currentTimestamp = Math.floor(response.time);
-    const mins = Math.floor(currentTimestamp / 60);
-    const secs = currentTimestamp % 60;
-    const formatted = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-    document.getElementById("get-time-btn").innerText = `Captured: ${formatted}`;
+
+    const videoId = getYouTubeVideoId(tab.url);
+    if (!videoId) return;
+
+    // Ask content script for current video timestamp
+    chrome.tabs.sendMessage(tab.id, { action: "getCurrentTime" }, (response) => {
+      const currentTimestamp = Math.floor(response?.time || 0);
+      const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      const thumbnailUrl = getYouTubeThumbnail(videoId);
+      const videoTitle = tab.title ? tab.title.replace("- YouTube", "").trim() : "YouTube Video";
+
+      chrome.storage.local.get({ notes: [] }, (data) => {
+        const newNote = {
+          id: Date.now(),
+          videoId: videoId,
+          url: cleanUrl,
+          title: videoTitle,
+          thumbnail: thumbnailUrl,
+          time: currentTimestamp,
+          text: text,
+          date: new Date().toLocaleDateString()
+        };
+
+        const updated = [...data.notes, newNote];
+        chrome.storage.local.set({ notes: updated }, () => {
+          if (noteInput) noteInput.value = "";
+          alert("Note saved!");
+        });
+      });
+    });
   });
-});
 
-// Save note to chrome.storage
-document.getElementById("save-btn").addEventListener("click", async () => {
-  const text = document.getElementById("note-input").value;
-  if (!text) return;
+  // 2. Export Notes Handler
+  exportBtn?.addEventListener("click", () => {
+    chrome.storage.local.get({ notes: [] }, (data) => {
+      const notes = data.notes;
+      if (!notes || notes.length === 0) {
+        alert("No notes saved yet to export!");
+        return;
+      }
 
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const videoTitle = tab ? tab.title.replace("- YouTube", "").trim() : "YouTube Video";
-  const videoUrl = tab ? tab.url.split("&")[0] : "";
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(notes, null, 2));
+      const downloadAnchor = document.createElement("a");
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `youtube_notes_${Date.now()}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    });
+  });
 
-  chrome.storage.local.get({ notes: [] }, (data) => {
-    const newNote = {
-      id: Date.now(),
-      url: videoUrl,
-      title: videoTitle,
-      time: currentTimestamp,
-      text: text,
-      date: new Date().toLocaleDateString()
-    };
-
-    const updated = [...data.notes, newNote];
-    chrome.storage.local.set({ notes: updated }, () => {
-      document.getElementById("note-input").value = "";
-      renderNotes(updated);
+  // 3. Open Dashboard Handler
+  dashboardBtn?.addEventListener("click", () => {
+    chrome.runtime.sendMessage({ action: "openOptions" }, (response) => {
+      if (chrome.runtime.lastError || !response) {
+        chrome.tabs.create({ url: chrome.runtime.getURL("options.html") });
+      }
     });
   });
 });
-
-// Render recent notes in popup
-function renderNotes(notes) {
-  const container = document.getElementById("notes-container");
-  container.innerHTML = "";
-  if (notes.length === 0) {
-    container.innerHTML = `<div style="font-size:12px; color:#888;">No notes yet.</div>`;
-    return;
-  }
-  notes.slice(-5).reverse().forEach((item) => {
-    const div = document.createElement("div");
-    div.className = "note-item";
-    const mins = Math.floor(item.time / 60);
-    const secs = item.time % 60;
-    const fmt = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-    div.innerHTML = `<span class="timestamp">[${fmt}]</span> ${item.text}`;
-    container.appendChild(div);
-  });
-}
-
-// Export function
-document.getElementById("export-btn").addEventListener("click", () => {
-  chrome.storage.local.get({ notes: [] }, (data) => {
-    if (data.notes.length === 0) return alert("No notes to export!");
-    const blob = new Blob([JSON.stringify(data.notes, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    chrome.downloads.download({
-      url: url,
-      filename: `youtube-notes-${new Date().toISOString().slice(0,10)}.json`,
-      saveAs: false
-    });
-  });
-});
-
-// Direct Open Dashboard
-document.getElementById("open-dashboard-btn").addEventListener("click", () => {
-  chrome.runtime.openOptionsPage();
-});
-
-// Auto-sync popup list if notes change anywhere
-chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace === "local" && changes.notes) {
-    renderNotes(changes.notes.newValue || []);
-  }
-});
-
-// Initial load
-chrome.storage.local.get({ notes: [] }, (data) => renderNotes(data.notes));

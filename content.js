@@ -40,38 +40,28 @@ function injectNotePanel() {
   `;
 
   panel.innerHTML = `
-    <h3 style="margin: 0 0 8px 0; font-size: 15px;">Video Notes</h3>
-    <button id="yt-note-capture-btn" style="width: 100%; padding: 6px; background: #cc0000; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">+ Timestamp Note</button>
-    <textarea id="yt-note-input" placeholder="Write a note for this timestamp..." style="width: 100%; height: 50px; margin-top: 8px; box-sizing: border-box; background: #181818; color: white; border: 1px solid #383838; border-radius: 4px; padding: 6px; resize: vertical;"></textarea>
+    <h3 style="margin: 0 0 8px 0; font-size: 15px;">Youtube Notes for Merve</h3>
+    <textarea id="yt-note-input" placeholder="Note..." style="width: 100%; height: 60px; box-sizing: border-box; background: #181818; color: white; border: 1px solid #383838; border-radius: 4px; padding: 6px; resize: vertical;"></textarea>
     <button id="yt-note-save-btn" style="width: 100%; padding: 6px; margin-top: 6px; background: #3ea6ff; color: #0f0f0f; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Save Note</button>
     <div id="yt-notes-list" style="margin-top: 10px; max-height: 180px; overflow-y: auto;"></div>
-    <button id="yt-open-dashboard" style="width: 100%; padding: 6px; margin-top: 8px; background: transparent; color: #aaa; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 12px;">Open Full Dashboard ↗</button>
-  `;
+   `;
 
   // Safely insert panel at top of sidebar
   secondary.insertBefore(panel, secondary.firstChild);
 
-  let capturedTime = 0;
-
-  // Capture current playback time
-  document.getElementById("yt-note-capture-btn").addEventListener("click", () => {
-    const video = document.querySelector("video");
-    if (video) {
-      capturedTime = Math.floor(video.currentTime);
-      const mins = Math.floor(capturedTime / 60);
-      const secs = capturedTime % 60;
-      document.getElementById("yt-note-capture-btn").innerText = `Timestamp: ${mins}:${secs < 10 ? '0' : ''}${secs}`;
-    }
-  });
-
-  // Save note associated strictly with videoId
+  // Automatically capture current playback time upon saving
   document.getElementById("yt-note-save-btn").addEventListener("click", () => {
-    const text = document.getElementById("yt-note-input").value;
+    const textInput = document.getElementById("yt-note-input");
+    const text = textInput.value.trim();
     if (!text) return;
 
     const currentUrl = window.location.href;
     const videoId = getYouTubeVideoId(currentUrl);
     if (!videoId) return alert("Could not identify YouTube video ID.");
+
+    // Auto-grab current video playback time
+    const video = document.querySelector("video");
+    const currentTimestamp = video ? Math.floor(video.currentTime) : 0;
 
     const videoTitle = document.querySelector("h1.ytd-watch-metadata")?.innerText || document.title.replace("- YouTube", "").trim();
     const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
@@ -84,14 +74,14 @@ function injectNotePanel() {
         url: cleanUrl,
         title: videoTitle,
         thumbnail: thumbnailUrl,
-        time: capturedTime,
+        time: currentTimestamp,
         text: text,
         date: new Date().toLocaleDateString()
       };
       
       const updated = [...data.notes, newNote];
       chrome.storage.local.set({ notes: updated }, () => {
-        document.getElementById("yt-note-input").value = "";
+        textInput.value = "";
         loadCurrentVideoNotes();
       });
     });
@@ -128,7 +118,7 @@ function loadCurrentVideoNotes() {
   }
 
   chrome.storage.local.get({ notes: [] }, (data) => {
-    // Filter strictly by videoId (or fallback url matching for old notes)
+    // Filter strictly by videoId (or fallback url matching)
     const matching = data.notes.filter(n => n.videoId === videoId || n.url.includes(`v=${videoId}`));
     
     if (matching.length === 0) {
@@ -180,7 +170,6 @@ const observer = new MutationObserver(() => {
       if (!document.getElementById("custom-yt-notes-panel")) {
         injectNotePanel();
       } else if (currentVideoId !== lastVideoId) {
-        // Video changed on YouTube without full page refresh: update note list
         lastVideoId = currentVideoId;
         loadCurrentVideoNotes();
       }
