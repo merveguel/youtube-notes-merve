@@ -6,13 +6,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// Extract YouTube Video ID to construct Thumbnail URL
-function getYouTubeThumbnail(url) {
+// Utility: Extract YouTube Video ID from URL
+function getYouTubeVideoId(url) {
   const match = url.match(/[?&]v=([^&]+)/);
-  if (match && match[1]) {
-    return `https://img.youtube.com/vi/${match[1]}/hqdefault.jpg`;
-  }
-  return "";
+  return match && match[1] ? match[1] : null;
+}
+
+// Utility: Construct Thumbnail URL from Video ID
+function getYouTubeThumbnail(videoId) {
+  return videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : "";
 }
 
 // Safely Inject Sidebar Panel into YouTube
@@ -46,7 +48,7 @@ function injectNotePanel() {
     <button id="yt-open-dashboard" style="width: 100%; padding: 6px; margin-top: 8px; background: transparent; color: #aaa; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 12px;">Open Full Dashboard ↗</button>
   `;
 
-  // Safely insert panel at the top of the sidebar without disturbing existing YouTube elements
+  // Safely insert panel at top of sidebar
   secondary.insertBefore(panel, secondary.firstChild);
 
   let capturedTime = 0;
@@ -62,19 +64,24 @@ function injectNotePanel() {
     }
   });
 
-  // Save note to chrome.storage
+  // Save note associated strictly with videoId
   document.getElementById("yt-note-save-btn").addEventListener("click", () => {
     const text = document.getElementById("yt-note-input").value;
     if (!text) return;
 
+    const currentUrl = window.location.href;
+    const videoId = getYouTubeVideoId(currentUrl);
+    if (!videoId) return alert("Could not identify YouTube video ID.");
+
     const videoTitle = document.querySelector("h1.ytd-watch-metadata")?.innerText || document.title.replace("- YouTube", "").trim();
-    const videoUrl = window.location.href.split("&")[0];
-    const thumbnailUrl = getYouTubeThumbnail(videoUrl);
+    const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const thumbnailUrl = getYouTubeThumbnail(videoId);
 
     chrome.storage.local.get({ notes: [] }, (data) => {
       const newNote = {
         id: Date.now(),
-        url: videoUrl,
+        videoId: videoId,
+        url: cleanUrl,
         title: videoTitle,
         thumbnail: thumbnailUrl,
         time: capturedTime,
@@ -97,12 +104,10 @@ function injectNotePanel() {
       try {
         chrome.runtime.sendMessage({ action: "openOptions" }, (response) => {
           if (chrome.runtime.lastError || !response) {
-            // Direct tab fallback if background script doesn't respond
             window.open(chrome.runtime.getURL("options.html"), "_blank");
           }
         });
       } catch (err) {
-        // Ultimate fallback
         window.open(chrome.runtime.getURL("options.html"), "_blank");
       }
     });
@@ -111,40 +116,77 @@ function injectNotePanel() {
   loadCurrentVideoNotes();
 }
 
-// Load and display notes saved for the active video
+// Load and display notes isolated strictly to the active video ID
 function loadCurrentVideoNotes() {
-  const currentUrl = window.location.href.split("&")[0];
+  const videoId = getYouTubeVideoId(window.location.href);
+  const list = document.getElementById("yt-notes-list");
+  if (!list) return;
+
+  if (!videoId) {
+    list.innerHTML = `<div style="font-size:12px; color:#aaa;">No video detected.</div>`;
+    return;
+  }
+
   chrome.storage.local.get({ notes: [] }, (data) => {
-    const list = document.getElementById("yt-notes-list");
-    if (!list) return;
+    // Filter strictly by videoId (or fallback url matching for old notes)
+    const matching = data.notes.filter(n => n.videoId === videoId || n.url.includes(`v=${videoId}`));
     
-    const matching = data.notes.filter(n => n.url === currentUrl);
     if (matching.length === 0) {
       list.innerHTML = `<div style="font-size:12px; color:#aaa;">No notes saved for this video yet.</div>`;
       return;
     }
-    list.innerHTML = matching.map(n => {
+
+    list.innerHTML = "";
+    matching.forEach(n => {
       const mins = Math.floor(n.time / 60);
       const secs = n.time % 60;
       const fmt = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-      return `<div style="padding: 4px 0; border-bottom: 1px solid #333; font-size: 12px;">
-        <span style="color: #3ea6ff; cursor: pointer; font-weight: bold;" onclick="document.querySelector('video').currentTime=${n.time}">[${fmt}]</span> ${n.text}
-      </div>`;
-    }).join("");
+
+      const itemDiv = document.createElement("div");
+      itemDiv.style.cssText = "padding: 4px 0; border-bottom: 1px solid #333; font-size: 12px;";
+
+      const timeSpan = document.createElement("span");
+      timeSpan.style.cssText = "color: #3ea6ff; cursor: pointer; font-weight: bold; margin-right: 6px;";
+      timeSpan.innerText = `[${fmt}]`;
+
+      timeSpan.addEventListener("click", () => {
+        const video = document.querySelector("video");
+        if (video) {
+          video.currentTime = n.time;
+          video.play();
+        }
+      });
+
+      const textSpan = document.createElement("span");
+      textSpan.innerText = n.text;
+
+      itemDiv.appendChild(timeSpan);
+      itemDiv.appendChild(textSpan);
+      list.appendChild(itemDiv);
+    });
   });
 }
 
-// Debounce function to prevent MutationObserver infinite loops on YouTube SPA navigation
+// Track SPA URL shifts to reload notes when clicking recommended videos
+let lastVideoId = getYouTubeVideoId(window.location.href);
 let timeout = null;
+
 const observer = new MutationObserver(() => {
   if (timeout) clearTimeout(timeout);
   timeout = setTimeout(() => {
-    // Only run if on a watch page and panel isn't present
-    if (window.location.pathname === "/watch" && !document.getElementById("custom-yt-notes-panel")) {
-      injectNotePanel();
+    const currentVideoId = getYouTubeVideoId(window.location.href);
+    
+    if (window.location.pathname === "/watch") {
+      if (!document.getElementById("custom-yt-notes-panel")) {
+        injectNotePanel();
+      } else if (currentVideoId !== lastVideoId) {
+        // Video changed on YouTube without full page refresh: update note list
+        lastVideoId = currentVideoId;
+        loadCurrentVideoNotes();
+      }
     }
   }, 300);
 });
 
-// Observe child DOM changes safely
+// Observe DOM changes safely
 observer.observe(document.body, { childList: true, subtree: true });
