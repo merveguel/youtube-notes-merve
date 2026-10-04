@@ -40,19 +40,20 @@ function injectNotePanel() {
   `;
 
   panel.innerHTML = `
-    <h3 style="margin: 0 0 8px 0; font-size: 15px;">Youtube Notes for Merve</h3>
-    <textarea id="yt-note-input" placeholder="Note..." style="width: 100%; height: 60px; box-sizing: border-box; background: #181818; color: white; border: 1px solid #383838; border-radius: 4px; padding: 6px; resize: vertical;"></textarea>
-    <button id="yt-note-save-btn" style="width: 100%; padding: 6px; margin-top: 6px; background: #3ea6ff; color: #0f0f0f; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Save Note</button>
+    <h3 style="margin: 0 0 8px 0; font-size: 15px;">Video Notes</h3>
+    <textarea id="yt-note-input" placeholder="Note... (cmd+enter)" style="width: 100%; height: 60px; box-sizing: border-box; background: #181818; color: white; border: 1px solid #383838; border-radius: 4px; padding: 6px; resize: vertical;"></textarea>
+    <button id="yt-note-save-btn" style="width: 100%; padding: 6px; margin-top: 6px; background: #3ea6ff; color: #0f0f0f; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Save Note (Ctrl+Enter)</button>
     <div id="yt-notes-list" style="margin-top: 10px; max-height: 180px; overflow-y: auto;"></div>
-   `;
+    <button id="yt-open-dashboard" style="width: 100%; padding: 6px; margin-top: 8px; background: transparent; color: #aaa; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 12px;">Open Full Dashboard ↗</button>
+  `;
 
   // Safely insert panel at top of sidebar
   secondary.insertBefore(panel, secondary.firstChild);
 
-  // Automatically capture current playback time upon saving
-  document.getElementById("yt-note-save-btn").addEventListener("click", () => {
+  // Core Save Note Function
+  const saveNote = () => {
     const textInput = document.getElementById("yt-note-input");
-    const text = textInput.value.trim();
+    const text = textInput ? textInput.value.trim() : "";
     if (!text) return;
 
     const currentUrl = window.location.href;
@@ -81,13 +82,27 @@ function injectNotePanel() {
       
       const updated = [...data.notes, newNote];
       chrome.storage.local.set({ notes: updated }, () => {
-        textInput.value = "";
+        if (textInput) textInput.value = "";
         loadCurrentVideoNotes();
       });
     });
-  });
+  };
 
-  // Dual-fallback Dashboard button handler
+  // 1. Trigger save on "Save Note" button click
+  document.getElementById("yt-note-save-btn").addEventListener("click", saveNote);
+
+  // 2. Keyboard Shortcut: Save on Ctrl + Enter or Cmd + Enter inside textarea
+  const textarea = document.getElementById("yt-note-input");
+  if (textarea) {
+    textarea.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        saveNote();
+      }
+    });
+  }
+
+  // Dashboard button handler
   const dashboardBtn = document.getElementById("yt-open-dashboard");
   if (dashboardBtn) {
     dashboardBtn.addEventListener("click", () => {
@@ -118,7 +133,7 @@ function loadCurrentVideoNotes() {
   }
 
   chrome.storage.local.get({ notes: [] }, (data) => {
-    // Filter strictly by videoId (or fallback url matching)
+    // Filter strictly by videoId
     const matching = data.notes.filter(n => n.videoId === videoId || n.url.includes(`v=${videoId}`));
     
     if (matching.length === 0) {
